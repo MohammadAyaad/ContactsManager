@@ -28,19 +28,19 @@ public class ContactsManager {
 
         try {
             _connection = DriverManager.getConnection("jdbc:sqlite:contacts.db");
-            
+
             Function.create(_connection, "REGEXP", new Function() {
-            @Override
-            protected void xFunc() throws SQLException {
-                String expression = value_text(0);
-                String value = value_text(1);
-                if (value == null) value = "";
-                Pattern pattern = Pattern.compile(expression);
-                result(pattern.matcher(value).find() ? 1 : 0);
-            }
-        });
+                @Override
+                protected void xFunc() throws SQLException {
+                    String expression = value_text(0);
+                    String value = value_text(1);
+                    if (value == null) value = "";
+                    Pattern pattern = Pattern.compile(expression);
+                    result(pattern.matcher(value).find() ? 1 : 0);
+                }
+            });
             Function.create(_connection, "EDITD", new LevenshteinDistanceSQLite());
-            
+
             _statement = _connection.createStatement();
             _statement.setQueryTimeout(30);
             if(!isDatabaseInit())
@@ -54,7 +54,7 @@ public class ContactsManager {
     }
 
     public List<ContactBasic> getContacts() throws SQLException {
-        ResultSet rs = _statement.executeQuery("SELECT * FROM Contacts ORDER BY (Contacts.firstName || ' ' || Contacts.lastName)");
+        ResultSet rs = _statement.executeQuery("SELECT * FROM Contacts ORDER BY (Contacts.firstName || ' ' || Contacts.lastName) DESC");
         List<ContactBasic> contacts = new ArrayList();
         ContactBasic c;
         while (rs.next()) {
@@ -82,12 +82,13 @@ public class ContactsManager {
         }
         String[] numbers = rs.getString("numbers").split(",");
         for(int i = 0;i < numbers.length;i++) {
+            System.out.println("PARSING NUMBER : " + numbers[i]);
             PhoneNumber n = PhoneNumber.FromString(numbers[i]);
             c.phoneNumbers.add(n);
         }
         return c;
     }
-    
+
     public void addContact(Contact c) throws SQLException {
         _statement.executeUpdate("BEGIN;INSERT INTO Contacts(firstName,lastName,jobTitle) VALUES('"+c.firstName+"','"+c.lastName+"','"+c.jobTitle+"');");
         ResultSet rs = _statement.executeQuery("SELECT last_insert_rowid();");
@@ -111,7 +112,7 @@ public class ContactsManager {
         System.out.println(qry);
         _statement.executeUpdate(qry);
     }
-    
+
     public void updateContactDetails(Contact c) throws SQLException {
         String qry= "BEGIN;UPDATE Contacts SET firstName='"+c.firstName+"',lastName='"+c.lastName+"',jobTitle='"+c.jobTitle+"' WHERE Contacts.id="+c.id+";DELETE FROM PhoneNumbers WHERE PhoneNumbers.contact_id=" + c.id + ";DELETE FROM emails WHERE emails.contact_id=" + c.id + ";";
         if(c.phoneNumbers.size() != 0) {
@@ -132,22 +133,17 @@ public class ContactsManager {
         System.out.println(qry);
         _statement.executeUpdate(qry);
     }
-    
+
     public void deleteContact(int id) throws SQLException {
         _statement.executeUpdate("BEGIN;DELETE FROM PhoneNumbers WHERE PhoneNumbers.contact_id="+id+";DELETE FROM emails WHERE emails.contact_id="+id+";DELETE FROM Contacts WHERE Contacts.id=" + id + ";COMMIT;");
     }
-    
-    private String getSearchRegexTerm(String input) {
-        String s = "";
-        for(int i = 0;i < input.length();i++) {
-            s += input.charAt(i) + ".*";
-        }
-        return s;
-    }
-    
+
     public List<ContactBasic> searchContact(String term) throws SQLException {
         String rterm = term;
-        ResultSet rs = _statement.executeQuery("SELECT Contacts.*,MIN(EDITD((Contacts.firstName || ' ' || Contacts.lastName),'"+rterm+"'),EDITD(CAST(PhoneNumbers.phoneNumber AS TEXT),'"+rterm+"'),EDITD(emails.email,'"+rterm+"')) AS distance FROM Contacts LEFT JOIN PhoneNumbers ON PhoneNumbers.contact_id = Contacts.id LEFT JOIN emails ON emails.contact_id = Contacts.id GROUP BY Contacts.id ORDER BY distance ASC;");
+        String qry = "SELECT Contacts.*,MIN((CASE WHEN (Contacts.firstName IS NOT NULL AND Contacts.lastName IS NOT NULL) THEN EDITD((Contacts.firstName || ' ' || Contacts.lastName),'"+rterm+"') ELSE 2147483647 END),(CASE WHEN PhoneNumbers.phoneNumber IS NOT NULL THEN EDITD(CAST(PhoneNumbers.phoneNumber AS TEXT),'"+rterm+"') ELSE 2147483647 END),(CASE WHEN emails.email IS NOT NULL THEN EDITD(emails.email,'"+rterm+"') ELSE 2147483647 END)) AS distance FROM Contacts LEFT JOIN PhoneNumbers ON PhoneNumbers.contact_id = Contacts.id LEFT JOIN emails ON emails.contact_id = Contacts.id GROUP BY Contacts.id ORDER BY distance ASC,(Contacts.firstName || ' ' || Contacts.lastName) DESC;";
+        System.out.println(qry);
+        ResultSet rs = _statement.executeQuery(qry);
+        System.out.println("QRY EXECUTED");
         List<ContactBasic> contacts = new ArrayList();
         ContactBasic c;
         while (rs.next()) {
@@ -160,7 +156,7 @@ public class ContactsManager {
         }
         return contacts;
     }
-    
+
     private void initDatabase() throws SQLException {
         String contactsTable = "CREATE TABLE Contacts (\r\n"
                 + "    id        INTEGER PRIMARY KEY NOT NULL,\r\n"
@@ -189,7 +185,7 @@ public class ContactsManager {
                 + ");";
         _statement.executeUpdate("BEGIN;\r\n" + contactsTable + "\r\n" + phoneNumbersTable + "\r\n" + emailsTable + "\r\nCOMMIT;");
     }
-    
+
     public void clearDatabase() throws SQLException {
         _statement.executeUpdate("DELETE FROM Contacts;DELETE FROM PhoneNumbers;DELETE FROM emails");
     }
@@ -213,25 +209,4 @@ public class ContactsManager {
             return false;
         }
     }
-
-    /*
-	 create LS-CRUD+S
-	 L-CRUD+S :
-	 Create Contacts n
-	 Read Contacts y
-	 Update Contacts n
-	 Delete Contacts y
-	 Search Contacts y
-	 
-	 S-CRUD+S :
-	 Create Contact y
-	 Read Contact y
-	 Update Contact y
-	 Delete Contact y
-	 Search Contact n
-
-	Other :
-	Search Contacts By Number y
-	Search Contacts By Name y
-     */
 }
